@@ -1,43 +1,44 @@
-from pydantic import BaseModel
 from asyncio import create_subprocess_exec, wait_for
+from typing import TypedDict
 
 
-class Property(BaseModel):
-    type: str = 'string'
-    description: str = 'The argument.'
+class Property(TypedDict):
+    type: str
+    description: str
 
 
-class Parameters(BaseModel):
-    type: str = 'object'
-    properties: dict[str, Property] = {'arg': Property()}
-    required: list[str] = ['arg']
+class Parameters(TypedDict):
+    type: str
+    properties: dict[str, Property]
+    required: list[str]
 
 
-class Function(BaseModel):
-    name: str = ''
-    description: str = ''
-    parameters: Parameters = Parameters()
-    arguments: str | None = None
-    program: str | None = None
-
-    async def run(self, arg) -> object:
-        process = await create_subprocess_exec(self.program or self.name, '-c', arg, stdout=-1, stderr=-1)
-        assert process.stdout and process.stderr
-        try:
-            arg = await wait_for(process.wait(), 60)
-        except TimeoutError:
-            process.kill()
-            arg = 'timeout'
-        return {'code': arg, 'stdout': (await process.stdout.read()).decode(errors='replace'), 'stderr': (await process.stderr.read()).decode(errors='replace')}
+class Function(TypedDict):
+    name: str
+    program: str
+    description: str
+    parameters: Parameters
+    arguments: str
 
 
-class Tool(BaseModel):
-    type: str = 'function'
+class Tool(TypedDict):
+    type: str
     function: Function
 
 
+async def doTool(tool: str, arg: str) -> dict[str, int | str]:
+    process = await create_subprocess_exec(*TOOL[tool]['function']['program'].split(), '-c', arg, stdout=-1, stderr=-1)
+    assert process.stdout and process.stderr
+    try:
+        res = await wait_for(process.wait(), 60)
+    except TimeoutError:
+        process.kill()
+        res = 'timeout'
+    return {'code': res, 'stdout': (await process.stdout.read()).decode(errors='replace'), 'stderr': (await process.stderr.read()).decode(errors='replace')}
+
 TOOL = {
-    'python': Tool(function=Function(name='python', program='docker run --rm ipython/ipython ipython -c', description='Run code in python with 60s timeout and return stdout with stderr.')),
-    'bash': Tool(function=Function(name='bash', program='docker run --rm ipython/ipython bash -c', description='Run code in bash with 60s timeout and return stdout with stderr.')),
-    # 'search': Tool(function=Function(name='search', description='Search text in search engine.'))
+    'python': Tool(type='function', function=Function(name='python', program='docker run --rm ipython/ipython ipython -c', description='Run code in python with 60s timeout and return stdout with stderr.', parameters=Parameters(type='object', properties={'arg': Property(type='string', description='The argument.')}, required=['arg']), arguments='')),
+    'docker/python': Tool(type='function', function=Function(name='docker/python', program='ipython -c', description='Run code in python with 60s timeout and return stdout with stderr.', parameters=Parameters(type='object', properties={'arg': Property(type='string', description='The argument.')}, required=['arg']), arguments='')),
+    'bash': Tool(type='function', function=Function(name='bash', program='docker run --rm ipython/ipython bash -c', description='Run code in python with 60s timeout and return stdout with stderr.', parameters=Parameters(type='object', properties={'arg': Property(type='string', description='The argument.')}, required=['arg']), arguments='')),
+    'docker/bash': Tool(type='function', function=Function(name='docker/bash', program='bash -c', description='Run code in python with 60s timeout and return stdout with stderr.', parameters=Parameters(type='object', properties={'arg': Property(type='string', description='The argument.')}, required=['arg']), arguments='')),
 }

@@ -20,7 +20,8 @@
         * [x] Tg
         * [x] TgTime
     * Now
-        * [ ] RAG
+        * [x] RAG
+            * [x] Rerank
         * [x] User
         * [x] Think
         * [x] Response
@@ -28,7 +29,8 @@
             * [x] Python in Docker
             * [x] Bash in Docker
             * [ ] Search
-* [ ] Embedding
+* [x] Embedding
+* [x] Rerank
 * [x] Tool
 * [x] Stream
 * [x] Charging
@@ -37,3 +39,6 @@
         * [ ] Distribiued lock
     * [x] Fair scheduling
     * [x] Sticky session
+* [x] Flexible input/output
+* [x] pg
+    * [x] pgvector

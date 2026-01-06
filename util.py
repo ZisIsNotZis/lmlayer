@@ -1,5 +1,6 @@
 from asyncio import Future
 from heapq import heappop, heappush
+from typing import Iterator
 
 
 class PriorityLock(list[tuple[float, Future]]):
@@ -15,9 +16,15 @@ class PriorityLock(list[tuple[float, Future]]):
             heappush(self, (priority, future))
             return future
 
-    def release(self) -> None:
+    def release(self):
         while self:
             _, future = heappop(self)
             if not future.done():
                 return future.set_result(None)
         self.n += 1
+
+
+def chunkit(s: str, n=4096) -> Iterator[str]:
+    while s:
+        yield s[:n]
+        s = s[n:]

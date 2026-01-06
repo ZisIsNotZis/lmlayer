@@ -1,0 +1,7 @@
+fastapi
+httpx_sse
+sqlalchemy[asyncio]
+psycopg2-binary
+
+[local]:
+numpy
