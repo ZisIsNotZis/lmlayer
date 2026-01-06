@@ -1,5 +1,4 @@
 from time import time
-from heapq import heappop, heappush
 from typing import AsyncIterator
 from asyncio import Task, Future
 from db import *
@@ -11,11 +10,7 @@ from json import loads, dumps, JSONDecodeError
 from traceback import format_exc
 from os import getenv
 from tool import *
-
-
-class Tuple[*T](tuple[*T]):
-    def __lt__(self, other):
-        return self[0] < other[0]
+from util import *
 
 
 class Instance(BaseModel):
@@ -24,7 +19,7 @@ class Instance(BaseModel):
 
 class Model(BaseModel):
     instances: dict[str, Instance]
-    prompt: str = 'You are a helpful assistant.'
+    prompt: str = 'You are a helpful assistant'
     cost: float = 1
 
 
@@ -81,6 +76,7 @@ async def logRequest(request: HttpRequest):
 
 
 MODEL = {str(i): Model(**j) for i, j in loads(getenv('MODELS', '{"qwen":{"instances":{"http://localhost:8080/v1/chat/completions":{}},"cost":0}}')).items()}
+LOCK = {i: PriorityLock(sum(i.num for i in j.instances.values()))for i, j in MODEL.items()}
 USER = dict[str, User]()
 JOB = dict[str, list[tuple[float, str, Request, Future[AsyncIterator[Response]]]]]()
 STICK = dict[tuple[str, str, str, int], float]()
@@ -93,38 +89,17 @@ SAFE_PERIOD = int(getenv('SAFE_PERIOD', 20))
 
 
 async def run(user: str, request: Request) -> AsyncIterator[Response]:
-    future = Future[AsyncIterator[Response]]()
-    heappush(JOB.setdefault(request.model, []), (USER.get(user, User()).cost, user, request, future))
-    schedule()
-    async for i in await future:
-        yield i
-
-
-def schedule() -> None:
-    b = 1
-    while b:
-        b = 0
-        for modelId, model in MODEL.items():
-            instances = [(i, j)for i, j in model.instances.items()if j.num > 0]
-            if not JOB.get(modelId) or not instances:
-                continue
-            b, user, request, future = heappop(JOB[modelId])
-            url, instance = max(instances, key=lambda i: i[1].num+STICK.get((modelId, i[0], user, request.sessionId), 0))
-            instance.num -= 1
-            STICK[modelId, url, user, request.sessionId] = time()
-            future.set_result(_run(url, user, request))
-
-
-async def _run(url: str, user: str, request: Request) -> AsyncIterator[Response]:
-    tool = ' '
-    role = 'user'
+    lock = LOCK[request.model].acquire(USER.get(user, User()).cost)
+    if lock:
+        await lock
+    url, instance = max([(i, j)for i, j in MODEL[request.model].instances.items()if j.num], key=lambda i: STICK.get((request.model, i[0], user, request.sessionId), 0)+i[1].num)
+    instance.num -= 1
     try:
-        assert await getBalance(user) > 0, 'no balance'
-        safe = [safeChk(request.messages[-1].content or '')]
-        request.stream = bool(request.stream)
+        safe = [Task(hasBalance(user)), safeChk(request.messages[-1].content or '')]
+        role = 'user'
         request.messages = (
             [Message(role='system', content=MODEL[request.model].prompt)] +
-            sum(([Message(role='tool'if isTool else 'user', content=i), Message(role='assistant', content=j)]for i, j, isTool in await getSession(user, request.sessionId)), []) +
+            sum(([Message(role=i, content=j), Message(role='assistant', content=j)]for i, j, k in await getSession(user, request.sessionId)), []) +
             [Message(role=role, content=request.messages[-1].content)]
         )
         while role:
@@ -147,49 +122,47 @@ async def _run(url: str, user: str, request: Request) -> AsyncIterator[Response]
                             if message.tool_calls:
                                 tool += message.tool_calls[0].function.name
                                 arguments += message.tool_calls[0].function.arguments or ''
-                            assert all(not i.done() or i.result()for i in safe), 'unsafe'
+                            assert all(not i.done() or i.result()for i in safe), 'no money/unsafe'
                             yield response
                     except JSONDecodeError:
                         pass
-                print(reasoning_content, content, tool, arguments)
             else:
                 responseObj = (await CLIENT.post(url, json=request.model_dump(exclude_none=True))).json()
-                print(responseObj)
                 response = Response(**responseObj)
                 message = response.choices[0].message
                 reasoning_content = message.reasoning_content
                 content = message.content or ''
+                safe.append(safeChk(content))
                 if message.tool_calls:
                     tool = message.tool_calls[0].function.name
                     arguments = message.tool_calls[0].function.arguments or ''
-            safe.append(safeChk(content))
+            print(reasoning_content, content, tool, arguments)
+            assert await safe[0] and await safe[1] and await safe[-1], 'no money/unsafe'
             cost = MODEL[request.model].cost*(response.timings.prompt_n*PP_FAC + response.timings.predicted_n)
             USER.setdefault(user, User()).cost += cost
             Task(addWallet(user, -cost))
             Task(addSession(user, request.sessionId, Session(
+                role=role,
                 user=request.messages[-1].content or '',
                 reasoning_content=reasoning_content or '',
                 content=content,
                 tool=tool,
                 arguments=arguments,
-                isTool=role == 'tool',
                 **response.timings.model_dump()
             )))
             role = ''
             if tool:
                 role = 'tool'
-                await safeChk(arguments)
                 try:
                     result = dumps(await TOOL[tool].function.run(**loads(arguments)), separators=(',', ':'), ensure_ascii=False)
                 except Exception:
                     result = format_exc()
                 request.messages += message, Message(role='tool', name=tool, content=result)
             elif not request.stream:
-                await safe[-1]
                 yield response
     finally:
-        MODEL[request.model].instances[url].num += 1
-        schedule()
+        instance.num += 1
+        LOCK[request.model].release()
 
 
 def safeChk(s: str) -> Future[bool]:

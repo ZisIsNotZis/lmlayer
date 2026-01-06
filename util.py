@@ -2,7 +2,7 @@ from asyncio import Future
 from heapq import heappop, heappush
 
 
-class PrioritySemaphore(list[tuple[float, Future]]):
+class PriorityLock(list[tuple[float, Future]]):
     def __init__(self, n=1):
         self.n = n
 
