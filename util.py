@@ -3,6 +3,11 @@ from heapq import heappop, heappush
 from typing import Iterator
 
 
+class Tuple(tuple):
+    def __lt__(self, value: tuple) -> bool:
+        return self[0] < value[0]
+
+
 class PriorityLock(list[tuple[float, Future]]):
     def __init__(self, n=1):
         self.n = n
@@ -13,7 +18,7 @@ class PriorityLock(list[tuple[float, Future]]):
             self.n -= 1
         else:
             future = Future()
-            heappush(self, (priority, future))
+            heappush(self, Tuple((priority, future)))
             return future
 
     def release(self):

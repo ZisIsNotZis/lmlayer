@@ -11,6 +11,7 @@ from os import getenv
 from tool import *
 from util import *
 from db import *
+from fastapi import HTTPException
 
 
 class Model(TypedDict):
@@ -91,6 +92,7 @@ class EmbeddingResponse(TypedDict):
 
 class RerankRequest(TypedDict):
     model: NotRequired[str]
+    query: str
     documents: list[str]
     top_n: int
 
@@ -113,7 +115,8 @@ def addCost(user: str, cost: float = 0.) -> float:
     return v
 
 
-MODEL: dict[str, Model] = loads(getenv('MODEL', '{"qwen":{"cost":0,"instances":{"http://localhost:8080":1}}}'))
+MODEL: dict[str, Model] = loads(getenv('MODEL', '{"qwen":{"cost":0,"instances":{"http://localhost:8080":1}},"qwenEmb":{"cost":0,"instances":{"http://localhost:8081":1},"embedding":true},"qwenRank":{"cost":0,"instances":{"http://localhost:8082":1},"rerank":true}}'))
+print(MODEL)
 _LOCK = {i: PriorityLock(sum(i for i in j['instances'].values()))for i, j in MODEL.items()}
 _COST = dict[str, tuple[float, float]]()
 _STICK = dict[tuple[str, str, str, str], float]()
@@ -150,8 +153,8 @@ _SAFE_RE = compile(getenv('SAFE_RE', '炸弹'))
 _SAFE_MODEL = getenv('SAFE_MODEL', '')
 _SAFE_PERIOD = int(getenv('SAFE_PERIOD', 50))
 _CHUNK = int(getenv('CHUNK', 1024))
-_EMBEDDING = int(getenv('EMBEDDING', 0))
-_RERANK = int(getenv('RERANK', 0))
+_EMBEDDING = int(getenv('EMBEDDING', 5))
+_RERANK = int(getenv('RERANK', 2))
 _TOOL = getenv('TOOL', '').split() or []
 
 
@@ -159,7 +162,7 @@ async def chat(userId: str, headers: dict[str, str], req: ChatRequest) -> AsyncI
     session = req.get('session', '')
     if not req['messages']:
         yield Headers()
-        yield ChatResponse(choices=[], messages=sum(([Message(role=i.role, content=i.user), Message(role='assistant', content=i.content)] for i in await getMessages(userId, session)), []))
+        yield ChatResponse(choices=[], messages=sum(([Message(role=i.role, content=i.userMsg), Message(role='assistant', content=i.content)] for i in await getMessages(userId, session)), []))
         return
     messages = await getMessages(userId, session)
     if sessionFork := req.get('sessionFork'):
@@ -167,40 +170,43 @@ async def chat(userId: str, headers: dict[str, str], req: ChatRequest) -> AsyncI
         for i in messages:
             i.session = sessionFork
         Task(addMessages(*messages))
-    content = _SAFE_RE.sub('', req['messages'][-1].get('content') or '')
-    cost = 0.
-    await safeChk(content)
+    userMsg = _SAFE_RE.sub('', req['messages'][-1].get('content') or '')
+    totalCost = 0.
+    await safeChk(userMsg)
     if nembedding := req.get('embedding', _EMBEDDING):
         try:
-            _, emb = await embedding(userId, headers, EmbeddingRequest(input=content, model=req.get('embeddingModel') or ''), False)
+            _, emb = await embedding(userId, headers, EmbeddingRequest(input=userMsg, model=req.get('embeddingModel') or ''), False)
             documents = await queryEmbeddings(emb['model'], emb['data'][0]['embedding'], nembedding)
-            cost += emb['cost']
+            totalCost += emb['cost']
             if len(documents) > (nrerank := req.get('rerank', _RERANK)):
                 try:
-                    _, rank = await rerank(userId, headers, RerankRequest(documents=documents, top_n=nrerank, model=req.get('rerankModel', '')))
+                    _, rank = await rerank(userId, headers, RerankRequest(query=userMsg, documents=documents, top_n=nrerank, model=req.get('rerankModel', '')))
                     documents = [documents[i['index']] for i in rank['results']]
-                    cost += rank['cost']
-                except AssertionError:
+                    totalCost += rank['cost']
+                except HTTPException:
                     pass
             if len(documents):
-                content = _PROMPT_RAG.format(user=messages, RAG='\n\n'.join(documents))
-        except AssertionError:
+                userMsg = _PROMPT_RAG.format(user=userMsg, RAG='\n\n'.join(documents))
+        except HTTPException:
             pass
-    model = req.get('model', next(i for i, j in MODEL.items()if j.get('chat', True)))
+    model = req.get('model', next((i for i, j in MODEL.items()if j.get('chat', True)), ''))
+    if model not in MODEL:
+        raise HTTPException(422, 'unsupport')
     if lock := _LOCK[model].acquire(addCost(userId)):
         await lock
     url = max([i for i, j in MODEL[model]['instances'].items()if j], key=lambda i: _STICK.get((model, i, userId, session), 0)+MODEL[model]['instances'][i])
     MODEL[model]['instances'][url] -= 1
     try:
         user = await getUser(userId)
-        assert user.quota >= 0, 'no balance'
-        req['messages'] = [Message(role='system', content=MODEL[model].get('prompt', _PROMPT))] + sum(([Message(role=i.role, content=i.userMsg), Message(role='assistant', content=i.content)]for i in messages), []) + [{'role': 'user', 'content': content}]
+        if user.quota < 0:
+            raise HTTPException(422, 'no quota')
+        req['messages'] = [Message(role='system', content=MODEL[model].get('prompt', _PROMPT))] + sum(([Message(role=i.role, content=i.userMsg), Message(role='assistant', content=i.content)]for i in messages), []) + [{'role': 'user', 'content': userMsg}]
         req['tools'] = [TOOL[i] for i in _TOOL]
         while True:
             rsp: ChatResponse = ChatResponse(choices=[])
             tool = ''
             arguments = ''
-            print(url, req)
+            print(url+'/v1/chat/completions', req)
             if req.get('stream'):
                 message = Message(role='')
                 reasoning_content = ''
@@ -216,7 +222,8 @@ async def chat(userId: str, headers: dict[str, str], req: ChatRequest) -> AsyncI
                             reasoning_content += message.get('reasoning_content', '')
                             content += message.get('content') or ''
                             if len(content)/_SAFE_PERIOD > len(task):
-                                assert not _SAFE_RE.findall(content), 'unsafe'
+                                if _SAFE_RE.findall(content):
+                                    raise HTTPException(422, 'unsafe')
                                 task.append(Task(safeChk(content)))
                             if tool_calls := message.get('tool_calls'):
                                 tool += tool_calls[0]['function']['name']
@@ -249,12 +256,14 @@ async def chat(userId: str, headers: dict[str, str], req: ChatRequest) -> AsyncI
             cost = (prompt_n*_PP_FAC + predicted_n)*MODEL[model].get('cost', 1.)
             addCost(userId, cost)
             user.quota -= cost
+            totalCost += cost
+            rsp['cost'] = totalCost
             Task(setUser(user))
             Task(addMessages(DbMessage(
                 user=userId,
                 session=session,
                 role=req['messages'][-1]['role'],
-                userMsg=req['messages'][-1].get('content') or '',
+                userMsg=userMsg,
                 reasoning_content=reasoning_content,
                 content=content,
                 cache_n=timings.get('cache_n', 0),
@@ -265,15 +274,14 @@ async def chat(userId: str, headers: dict[str, str], req: ChatRequest) -> AsyncI
                 predicted_ms=timings.get('predicted_ms', 0.),
                 tool=tool,
                 arguments=arguments,
-                time=time()
             )))
             if tool:
                 try:
-                    result = dumps(await doTool(tool, **loads(arguments)), separators=(',', ':'), ensure_ascii=False)
+                    userMsg = dumps(await doTool(tool, **loads(arguments)), separators=(',', ':'), ensure_ascii=False)
                 except Exception:
-                    result = format_exc()
+                    userMsg = format_exc()
                 req['messages'].append(message)
-                req['messages'].append(Message(role='tool', name=tool, content=result))
+                req['messages'].append(Message(role='tool', name=tool, content=userMsg))
             else:
                 if not req.get('stream'):
                     yield rsp
@@ -285,18 +293,20 @@ async def chat(userId: str, headers: dict[str, str], req: ChatRequest) -> AsyncI
 
 async def embedding(userId: str, headers: dict[str, str], req: EmbeddingRequest, add=True) -> tuple[Headers, EmbeddingResponse]:
     model = req.get('model') or next((i for i, j in MODEL.items()if j.get('embedding')), '')
-    assert model in MODEL, 'no support'
+    if model not in MODEL:
+        raise HTTPException(422, 'unsupport')
     if lock := _LOCK[model].acquire(addCost(userId)):
         await lock
-    url = max([i for i, j in MODEL[model].items()if j], key=lambda i: MODEL[model][i])
+    url = max([i for i, j in MODEL[model]['instances'].items()if j], key=lambda i: MODEL[model]['instances'][i])
     MODEL[model]['instances'][url] -= 1
     try:
         user = await getUser(userId)
-        assert user.quota >= 0, 'no balance'
+        if user.quota < 0:
+            raise HTTPException(422, 'no quota')
         input = req['input']
         await safeChk(input if isinstance(input, str)else ''.join(input))
         input = req['input'] = list(chunkit(input, req.get('chunk', _CHUNK if add else 99999)))if isinstance(input, str)else input
-        print(url, req)
+        print(url+'/v1/embeddings', req)
         httpRsp = await CLIENT.post(url+'/v1/embeddings', headers=headers, json=req)
         rsp: EmbeddingResponse = httpRsp.json()
         print(rsp)
@@ -305,6 +315,7 @@ async def embedding(userId: str, headers: dict[str, str], req: EmbeddingRequest,
         prompt_n = usage.get('prompt_tokens', usage.get('total_tokens', 0))
         cost = prompt_n*_PP_FAC*MODEL[model].get('cost', 1.)
         user.quota -= cost
+        rsp['cost'] = cost
         Task(setUser(user))
         if add:
             Task(addEmbeddings([Embedding(
@@ -314,7 +325,6 @@ async def embedding(userId: str, headers: dict[str, str], req: EmbeddingRequest,
                 text=j,
                 prompt_n=prompt_n,
                 cost=cost,
-                time=time()
             )for i, j in zip(rsp['data'], input)]))
         return httpRsp.headers, rsp
     finally:
@@ -324,15 +334,17 @@ async def embedding(userId: str, headers: dict[str, str], req: EmbeddingRequest,
 
 async def rerank(userId: str, headers: dict[str, str], req: RerankRequest) -> tuple[Headers, RerankResponse]:
     model = req.get('model') or next((i for i, j in MODEL.items()if j.get('rerank')), '')
-    assert model in MODEL, 'no support'
+    if model not in MODEL:
+        raise HTTPException(422, 'unsupport')
     if lock := _LOCK[model].acquire(addCost(userId)):
         await lock
-    url = max([i for i, j in MODEL[model].items()if j], key=lambda i: MODEL[model][i])
+    url = max([i for i, j in MODEL[model]['instances'].items()if j], key=lambda i: MODEL[model]['instances'][i])
     MODEL[model]['instances'][url] -= 1
     try:
         user = await getUser(userId)
-        assert user.quota >= 0, 'no balance'
-        print(url, req)
+        if user.quota < 0:
+            raise HTTPException(422, 'no quota')
+        print(url+'/v1/rerank', req)
         httpRsp = await CLIENT.post(url+'/v1/rerank', headers=headers, json=req)
         rsp: RerankResponse = httpRsp.json()
         print(rsp)
@@ -340,6 +352,7 @@ async def rerank(userId: str, headers: dict[str, str], req: RerankRequest) -> tu
         prompt_n = usage.get('prompt_tokens', usage.get('total_tokens', 0))
         cost = prompt_n*_PP_FAC*MODEL[model].get('cost', 1.)
         user.quota -= cost
+        rsp['cost'] = cost
         Task(setUser(user))
         return httpRsp.headers, rsp
     finally:
@@ -348,4 +361,5 @@ async def rerank(userId: str, headers: dict[str, str], req: RerankRequest) -> tu
 
 
 async def safeChk(s: str):
-    assert not _SAFE_MODEL or (await CLIENT.post(_SAFE_MODEL, json={'text': s})).json()['safe'], 'unsafe'
+    if _SAFE_MODEL and not (await CLIENT.post(_SAFE_MODEL, json={'text': s})).json()['safe']:
+        raise HTTPException(422, 'unsafe')

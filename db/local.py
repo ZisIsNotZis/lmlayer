@@ -3,7 +3,11 @@ import numpy as np
 
 _USER = dict[str, User]()
 _MESSAGE = dict[str, dict[str, list[DbMessage]]]()
-_DOCUMENT = dict[str, dict[str, list[Embedding]]]()
+_EMBEDDING = dict[str, list[Embedding]]()
+
+
+async def init():
+    pass
 
 
 async def getUser(id: str) -> User:
@@ -22,19 +26,20 @@ async def addMessages(*messages: DbMessage) -> None:
     _MESSAGE.setdefault(messages[0].user, {}).setdefault(messages[0].session, []).extend(messages)
 
 
-async def getDocuments(model: str) -> list[str]:
-    return list(_DOCUMENT.setdefault(model, {}))
+async def getDocuments(model: str) -> set[str]:
+    return {i.document for i in _EMBEDDING.setdefault(model, [])}
 
 
 async def queryEmbeddings(model: str, embedding: list[float], n: int = 5) -> list[str]:
-    score = np.stack([np.array(i.embedding, 'f') for i in _DOCUMENT[model].values()for i in i])@np.array(embedding, 'f')
-    text = [i.text for i in _DOCUMENT[model].values()for i in i]
-    return [text[i] for i in score.argpartition(-n-1)[-n:]]
+    text = _EMBEDDING.setdefault(model, [])
+    if len(text) > n:
+        text = [text[i]for i in (np.array([i.embedding for i in text], 'f')@np.array(embedding, 'f')).argpartition(-n)[-n:]]
+    return [i.text for i in text]
 
 
 async def addEmbeddings(embeddings: list[Embedding]) -> None:
-    _DOCUMENT.setdefault(embeddings[0].model, {})[embeddings[0].document] = embeddings
+    _EMBEDDING.setdefault(embeddings[0].model, []).extend(embeddings)
 
 
 async def delEmbeddings(model: str, document: str) -> None:
-    _DOCUMENT.setdefault(model, {}).pop(document, None)
+    _EMBEDDING[model] = [i for i in _EMBEDDING.get(model, [])if i != document]

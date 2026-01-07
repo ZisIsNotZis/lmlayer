@@ -1,35 +1,38 @@
 from .common import *
 from typing import Coroutine
 from sqlalchemy import select, delete
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from os import environ
 
-DB = environ['DB']  # 'postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/postgres'
-SESSION: AsyncSession | None = None
+_ENGINE = create_async_engine(environ['DB'])
+_MAKER = async_sessionmaker(_ENGINE)
 
 
-async def _getSession() -> AsyncSession:
-    global SESSION
-    if not SESSION:
-        SESSION = await AsyncSession(create_async_engine(DB)).__aenter__()
-    return SESSION
+async def init():
+    async with _ENGINE.begin() as connection:
+        await connection.exec_driver_sql('CREATE EXTENSION IF NOT EXISTS vector;')
+        await connection.run_sync(Base.metadata.create_all)
+        await connection.exec_driver_sql('CREATE INDEX ON embedding USING hnsw(embedding vector_ip_ops);')
 
 
 async def _set(*o):
-    (session := await _getSession()).add_all(o)
-    await session.commit()
+    async with _MAKER() as session:
+        session.add_all(o)
+        await session.commit()
 
 
 async def getUser(id: str) -> User:
-    return (await (await _getSession()).scalars(select(User).where(User.id == id))).first() or User()
+    async with _MAKER() as session:
+        return (await session.scalars(select(User).where(User.id == id))).first() or User(id=id, quota=0)
 
 
 def setUser(user: User) -> Coroutine:
     return _set(user)
 
 
-async def getMessages(user: str, session: str) -> list[DbMessage]:
-    return list((await (await _getSession()).scalars(select(DbMessage).where(DbMessage.user == user and DbMessage.session == session).order_by(DbMessage.sequence))).all())
+async def getMessages(user: str, sessionId: str) -> list[DbMessage]:
+    async with _MAKER() as session:
+        return list((await session.scalars(select(DbMessage).where(DbMessage.user == user and DbMessage.session == sessionId).order_by(DbMessage.create_at))).all())
 
 
 def addMessages(*messages: DbMessage) -> Coroutine:
@@ -37,11 +40,13 @@ def addMessages(*messages: DbMessage) -> Coroutine:
 
 
 async def getDocuments(model: str) -> list[str]:
-    return list((await (await _getSession()).scalars(select(Embedding.document).where(Embedding.model == model).distinct())).all())
+    async with _MAKER() as session:
+        return list((await session.scalars(select(Embedding.document).where(Embedding.model == model).distinct())).all())
 
 
 async def queryEmbeddings(model: str, embedding: list[float], n: int = 5) -> list[str]:
-    return list((await (await _getSession()).scalars(select(Embedding.text).where(Embedding.model == model).order_by(Embedding.embedding.op('<->')(embedding)).limit(n))).all())
+    async with _MAKER() as session:
+        return list((await session.scalars(select(Embedding.text).where(Embedding.model == model).order_by(Embedding.embedding.op('<#>')(embedding)).limit(n))).all())
 
 
 def addEmbeddings(embeddings: list[Embedding]) -> Coroutine:
@@ -49,4 +54,5 @@ def addEmbeddings(embeddings: list[Embedding]) -> Coroutine:
 
 
 async def delEmbeddings(model: str, document: str):
-    await (await _getSession()).execute(delete(Embedding).where(Embedding.model == model and Embedding.document == document))
+    async with _MAKER() as session:
+        await session.execute(delete(Embedding).where(Embedding.model == model and Embedding.document == document))
