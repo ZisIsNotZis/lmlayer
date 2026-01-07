@@ -166,7 +166,7 @@ _SAFE_PERIOD = int(getenv('SAFE_PERIOD', 50))
 _CHUNK = int(getenv('CHUNK', 1024))
 _EMBEDDING = int(getenv('EMBEDDING', 5))
 _RERANK = int(getenv('RERANK', 2))
-_TOOL = getenv('TOOL', '').split() or []
+_TOOL = getenv('TOOL', 'python bash').split()
 
 
 async def chat(userId: str, headers: dict[str, str], req: ChatRequest) -> AsyncIterator[Headers | ChatResponse]:

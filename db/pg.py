@@ -50,9 +50,7 @@ def setUser(user: User) -> Coroutine:
 async def getMessages(user: str, sessionId: str) -> list[DbMessage]:
     """Return list of `DbMessage` for a user/session ordered by creation time."""
     async with _MAKER() as session:
-        # Note: SQLAlchemy boolean expressions should use `&` or multiple arguments; the current
-        # `and` expression may not behave as intended and could be revisited if queries fail.
-        return list((await session.scalars(select(DbMessage).where(DbMessage.user == user and DbMessage.session == sessionId).order_by(DbMessage.create_at))).all())
+        return list((await session.scalars(select(DbMessage).where(DbMessage.user == user, DbMessage.session == sessionId).order_by(DbMessage.create_at))).all())
 
 
 def addMessages(*messages: DbMessage) -> Coroutine:
@@ -80,6 +78,4 @@ def addEmbeddings(embeddings: list[Embedding]) -> Coroutine:
 async def delEmbeddings(model: str, document: str):
     """Delete embeddings for a given model/document pair."""
     async with _MAKER() as session:
-        # Note: using `and` inside `where()` may not yield the intended SQL expression; consider
-        # changing to `&` or passing multiple where() arguments if deletion fails.
-        await session.execute(delete(Embedding).where(Embedding.model == model and Embedding.document == document))
+        await session.execute(delete(Embedding).where(Embedding.model == model, Embedding.document == document))
