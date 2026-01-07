@@ -1,3 +1,9 @@
+"""Tool execution helpers and TypedDict schemas describing external functions.
+
+`doTool` runs a configured tool by spawning a subprocess and returns its exit code
+and captured stdout/stderr. The `TOOL` table provides schema-like metadata used by callers.
+"""
+
 from asyncio import create_subprocess_exec, wait_for
 from typing import TypedDict
 
@@ -27,6 +33,10 @@ class Tool(TypedDict):
 
 
 async def doTool(tool: str, arg: str) -> dict[str, int | str]:
+    """Execute a configured tool program with `arg` and capture output.
+
+    Returns a dict with keys: `code` (exit code or 'timeout'), `stdout`, and `stderr`.
+    """
     process = await create_subprocess_exec(*TOOL[tool]['function']['program'].split(), '-c', arg, stdout=-1, stderr=-1)
     assert process.stdout and process.stderr
     try:

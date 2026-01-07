@@ -1,3 +1,9 @@
+"""Core logic for request processing, model routing and cost accounting.
+
+Defines typed DTOs for requests/responses and the async handlers that call
+backend model instances. Also provides a simple cost-decay accounting helper.
+"""
+
 from time import time
 from typing import AsyncIterator
 from asyncio import Task, gather
@@ -109,6 +115,11 @@ class RerankResponse(TypedDict):
 
 
 def addCost(user: str, cost: float = 0.) -> float:
+    """Update and return decayed cost for a given user.
+
+    Costs decay exponentially over time using the configured time factor. This
+    function updates the internal `_COST` table and returns the new value.
+    """
     v, t = _COST.get(user, (0., 0.))
     v = v*_TIME_FAC**(t-time())+cost
     _COST[user] = v, t
@@ -159,6 +170,13 @@ _TOOL = getenv('TOOL', '').split() or []
 
 
 async def chat(userId: str, headers: dict[str, str], req: ChatRequest) -> AsyncIterator[Headers | ChatResponse]:
+    """Handle a chat request and stream results from a model instance.
+
+    This coroutine yields either an initial `Headers()` object (for streaming)
+    and/or complete `ChatResponse` dicts. It performs safety checks, optional
+    retrieval-augmented generation (RAG), reranking, cost accounting, quota
+    checks, and optional tool invocation.
+    """
     session = req.get('session', '')
     if not req['messages']:
         yield Headers()

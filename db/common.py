@@ -1,3 +1,9 @@
+"""Database models and schema definitions.
+
+Defines SQLAlchemy models used by the application: `User`, `DbMessage`, and `Embedding`.
+The `EMBEDDING_DIM` constant is read from environment to size the embedding vector column.
+"""
+
 from sqlalchemy import func
 from datetime import datetime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -8,10 +14,12 @@ EMBEDDING_DIM = int(getenv('EMBEDDING_DIM', 1024))
 
 
 class Base(DeclarativeBase):
+    """Base class for declarative SQLAlchemy models."""
     pass
 
 
 class User(Base):
+    """Represents a user account with a quota for model usage."""
     __tablename__ = 'user'
     id: Mapped[str] = mapped_column(primary_key=True)
     quota: Mapped[float] = mapped_column(nullable=False)
@@ -40,6 +48,10 @@ class DbMessage(Base):
 
 
 class Embedding(Base):
+    """Stored embedding vectors for retrieval and RAG.
+
+    Uses pgvector to store fixed-size embedding vectors in Postgres.
+    """
     __tablename__ = f'embedding{EMBEDDING_DIM}'
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     document: Mapped[str] = mapped_column(nullable=False)
