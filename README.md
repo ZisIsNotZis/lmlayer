@@ -1,5 +1,5 @@
 # lmlayer - OpenAI-Compatible LLM Enhancement Layer
-`lmlayer` is a lightweight yet comprehensive OpenAI-compatible enhancement layer for LLM (Large Language Model) servers (e.g., vllm/llama-server). It addresses critical functionality gaps in native LLM servers by adding enterprise-grade capabilities via a transparent proxy model—no modifications to underlying LLM services required.
+`lmlayer` is a lightweight yet comprehensive **OpenAI-compatible** enhancement layer that sits transparently in front of **any** LLM server speaking the OpenAI API — `llama.cpp`/`llama-server`, vLLM, SGLang, TGI, Ollama, … It is protocol-level and server-agnostic: it addresses critical functionality gaps in native LLM servers by adding enterprise-grade capabilities via a transparent proxy, with **no modifications to the underlying service required**.
 
 ## Core Features
 ### 🔒 Full-Lifecycle Safety Check
@@ -60,7 +60,7 @@ Launch llama-server instances for core LLM, embedding, and rerank (adjust model 
 llama-server -m Qwen3-0.6B-UD-Q4_K_XL.gguf --temp .7 --min-p 0 --top-p .8 --top-k 20 &
 
 # Embedding server (port: 8081)
-llama-server -m Qwen3-Embedding-0.6B-IQ4_XS.gguf --embedding --pooling cls --port 8081 &
+llama-server -m Qwen3-Embedding-0.6B-IQ4_XS.gguf --embedding --pooling last --port 8081 &
 
 # Rerank server (port: 8082)
 llama-server -m Qwen3-Reranker-0.6B-IQ4_XS.gguf --rerank --port 8082 &
@@ -149,3 +149,25 @@ gunicorn app:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
 - `lmlayer` is an OpenAI-compatible enhancement layer for native LLM servers (vllm/llama-server)
 - Core value: Full-lifecycle safety, server-side session history, Auto RAG/rerank, and fair scheduling
 - Easy to deploy: Works with existing llama-server instances, uses pgvector for vector storage, and maintains transparent OpenAI API compatibility
+
+## Development / Smoke Test
+
+Verify the service imports and exposes the OpenAI-compatible surface without
+needing a database or a model server (the SQLAlchemy engine is lazy):
+
+```bash
+uv run --with fastapi --with httpx --with httpx_sse \
+   --with 'sqlalchemy[asyncio]' --with asyncpg --with pgvector \
+   --with numpy --with python-multipart --with uvicorn \
+   python tests/smoke_import.py
+```
+
+## Deployment (Docker Compose)
+
+`docker-compose.yml` starts pgvector + lmlayer; copy `.env.example` to `.env`
+and point `MODEL` at your OpenAI-compatible servers:
+
+```bash
+cp .env.example .env
+docker compose up --build
+```

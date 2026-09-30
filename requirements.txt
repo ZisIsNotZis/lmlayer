@@ -1,7 +1,10 @@
 fastapi
+uvicorn[standard]
+gunicorn
+httpx
 httpx_sse
 sqlalchemy[asyncio]
 asyncpg
-
-[local]:
+pgvector
 numpy
+python-multipart

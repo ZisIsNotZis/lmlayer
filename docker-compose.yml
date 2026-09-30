@@ -1,0 +1,16 @@
+services:
+  db:
+    image: pgvector/pgvector:pg18
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: postgres
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+  lmlayer:
+    build: .
+    env_file: [.env]
+    ports: ["8000:8000"]
+    depends_on: [db]
+volumes:
+  pgdata:
