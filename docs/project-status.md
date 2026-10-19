@@ -7,7 +7,14 @@ that sits in front of any LLM server speaking the OpenAI API.
 
 ## Status
 
-Active. Core features implemented and runnable: full-lifecycle safety checks
+Not under active development as of 2026-10-19. The last functional change was
+2026-01-07 (`git log -1 --date=short --format='%h %ad %s' -- app.py core.py
+tool.py util.py db/common.py` → `805f072` 2026-01-07; `core.py` last changed in
+`57ddeab`, same day); the 2026-09-30 commits (`498e298`, `6f5644c`) touched only
+README, Dockerfile, compose, smoke test and docs, and the latest commit
+`69497e9` (2026-10-15) is repository metadata.
+
+Implemented by then and not re-verified since: full-lifecycle safety checks
 (pre/post/tool, regex + model), server-side session & history management with
 cache/PP/TG token metrics, Auto RAG + pgvector retrieval + embedding/rerank,
 sandboxed python/bash tool execution, token quota accounting, fair scheduling

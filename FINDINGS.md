@@ -21,15 +21,23 @@
 | 11 | pgvector 向量列维度由环境变量决定，默认 1024，表名按维度后缀命名 | 1024 维 | `db/common.py:13`、`db/common.py:55`、`db/common.py:60` | 成立 |
 | 12 | 无数据库时使用 numpy 本地后端，对外提供与 pg 后端同名同签名的接口 | 5 个同名接口 | `db/local.py:40-59` 对照 `db/pg.py:61-78` | 成立 |
 | 13 | 嵌入输入按块切分后再批量请求，默认块长由 `CHUNK` 控制 | 默认 1024 | `util.py:46`、`core.py:166`、`core.py:326` | 成立 |
-| 14 | 仓库是 AGPL-3.0 | 1 个许可证 | `docs/project-status.md:32`、`LICENSE` | 成立 |
+| 14 | 仓库是 AGPL-3.0 | 1 个许可证 | `docs/project-status.md:39`、`LICENSE` | 成立 |
 
 ## 负结果
 
 | # | 结论 | 关键数字 | 出处 | 状态 |
 |---|---|---|---|---|
-| N1 | 检索与安全流水线没有端到端测试；唯一的自动化检查是 `tests/smoke_import.py`，只断言 HTTP 表面存在 | 1 个测试文件 | `docs/project-status.md:30-31` | 成立 |
-| N2 | 工具执行隔离不由代码保证，取决于部署方是否使用专用 Docker 网络 | — | `docs/project-status.md:31-32` | 成立 |
-| N3 | "100% OpenAI API 兼容"只有 README 声明，仓内没有任何一致性测试或对拍脚本支撑 | — | `README.md:43`（声明）；反证：`docs/project-status.md:30-31`（仅 1 个表面级测试） | 部分 |
+| N1 | 检索与安全流水线没有端到端测试；唯一的自动化检查是 `tests/smoke_import.py`，只断言 HTTP 表面存在 | 1 个测试文件 | `docs/project-status.md:37-38` | 成立 |
+| N2 | 工具执行隔离不由代码保证，取决于部署方是否使用专用 Docker 网络 | — | `docs/project-status.md:38-39` | 成立 |
+| N3 | "100% OpenAI API 兼容"只有 README 声明，仓内没有任何一致性测试或对拍脚本支撑 | — | `README.md:43`（声明）；反证：`docs/project-status.md:37-38`（仅 1 个表面级测试） | 部分 |
+
+## 已知问题（仓内证据不足以下结论）
+
+| # | 问题 | 为什么是问题 | 缺什么证据 | 出处 |
+|---|---|---|---|---|
+| K1 | 工具名与执行位置方向相反：`python`/`bash` 在 `docker run --rm ipython/ipython` 里执行，`docker/python`/`docker/bash` 在服务自身进程所在的环境里执行（不加沙箱） | 前缀 `docker/` 指向容器，实际却是不隔离的那一侧。若部署方按字面理解为"更隔离"而设 `TOOL=docker/python`，模型的命令会直接落在服务进程所在的机器上 | 需 owner 说明或一份写明命名约定的文档。仓内两种读法都自洽：(a) 命名笔误，`docker/` 本意是 `host/`；(b) 有意——服务按 `docker-compose.yml` 部署在容器里，`docker/X` 表示"就在这个 docker 里跑"，`X` 表示"再套一层 `docker run`"。`README.md:25-26` 只说明两种隔离模式存在，没写工具名与模式的对应关系 | `tool.py:50-53`、`core.py:169`、`README.md:25-26`、`be0f4ee`（引入这两个工具名的提交） |
+
+补充事实（可直接核对）：默认工具集是 `TOOL` 环境变量的默认值 `'python bash'`（`core.py:169`），即默认暴露给模型的是容器内执行的那两个；不隔离的 `docker/python`、`docker/bash` 只有部署方显式写进 `TOOL` 才会启用。`tool.py:50-53` 四个条目的 `description` 文本与工具名同样不对应（`bash`、`docker/bash` 的描述都写 "Run code in python"）。
 
 ## 撤回 / 回退记录
 
