@@ -16,7 +16,7 @@ Most OpenAI-compatible servers expose a model. They do not give you the operatio
 
 ## Quick start
 
-Requirements: Python 3.11+ and at least one OpenAI-compatible upstream. PostgreSQL with pgvector is optional; when `DB` is not set, `lmlayer` uses an in-memory NumPy backend.
+Requirements: Python 3.11+ and at least one OpenAI-compatible upstream. PostgreSQL with pgvector is optional; when `DB` is not set, `lmlayer` uses an in-memory NumPy backend. Docker is only needed for the default `python`/`bash` tools.
 
 ```bash
 python -m venv .venv
@@ -68,12 +68,12 @@ docker compose up --build
 ## What it can do now
 
 - **OpenAI-compatible endpoints** — `/v1/chat/completions`, `/v1/embeddings`, and `/v1/rerank`, plus transparent pass-through for every other path.
-- **Full-lifecycle safety** — regex and optional model-based checks on prompts, responses, streamed chunks, and tool calls.
+- **Safety checks** — regex and optional model-based checks on prompts, responses, and every streamed chunk. Tool arguments and tool output are not checked yet.
 - **Server-side sessions** — conversation history keyed by user and session, with history forking and cache/prompt/generation metrics.
 - **Automatic RAG** — embed the query, retrieve candidates from pgvector or the local NumPy store, rerank them, and inject context into the prompt.
-- **Tool loop** — Python and Bash tools executed through Docker or a host subprocess with a 60-second timeout.
+- **Tool loop** — Python and Bash tools run as subprocesses with a hard 60-second timeout. The default `python`/`bash` execute inside `docker run --rm ipython/ipython`; the confusingly named `docker/python`/`docker/bash` run directly in the service's own environment, with no isolation.
 - **Quota and cost accounting** — per-user, exponentially decaying cost budgets with quota enforcement.
-- **Fair scheduling** — a priority lock per model, plus sticky routing to improve cache hits.
+- **Fair scheduling** — a priority lock per model (priority = decayed user cost) and least-busy instance selection per request.
 - **Streaming** — SSE streaming with checks while tokens arrive.
 - **Flexible storage** — PostgreSQL/pgvector for production, in-memory storage for development.
 
@@ -134,18 +134,20 @@ Issues and pull requests are welcome. Keep changes focused, run the smoke check 
 **Implemented**
 
 - [x] OpenAI-compatible chat, embedding, and rerank endpoints with pass-through
-- [x] Prompt, response, streaming, and tool safety checks
+- [x] Prompt, response, and streaming safety checks
 - [x] Server-side session history and fork support
 - [x] Auto RAG over pgvector or an in-memory NumPy store
 - [x] Docker/host tool execution with a hard timeout
 - [x] Per-user cost, quota enforcement, and decay
-- [x] Priority-based fair scheduling and sticky upstream routing
+- [x] Priority-based fair scheduling and least-busy upstream selection
 - [x] SSE streaming with incremental safety checks
 
 **Planned**
 
 - [ ] Web search tool integration
 - [ ] End-to-end tests for retrieval and safety pipelines
+- [ ] Sticky session routing — `_STICK` is declared and read, but nothing ever writes to it
+- [ ] Safety checks on tool arguments and tool output
 - [ ] Clarify the `python`/`bash` versus `docker/python`/`docker/bash` naming so the isolation mode is explicit
 - [ ] Document a hardened deployment profile for tool isolation
 
