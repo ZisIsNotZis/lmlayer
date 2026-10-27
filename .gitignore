@@ -1,8 +1,41 @@
-.pi/
-__pycache__/
-*.py[cod]
-.venv/
+# Local environment
 .env
 .env.*
 !.env.example
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Build outputs
+build/
+dist/
+
+# JavaScript tooling (not part of this project, ignored defensively)
+node_modules/
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+*.bak
+*.orig
+.idea/
+.vscode/
+
+# Local agent workspace
+.pi/
+
+# Logs
 *.log
