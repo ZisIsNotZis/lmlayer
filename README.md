@@ -1,173 +1,156 @@
-# lmlayer - OpenAI-Compatible LLM Enhancement Layer
-`lmlayer` is a lightweight yet comprehensive **OpenAI-compatible** enhancement layer that sits transparently in front of **any** LLM server speaking the OpenAI API — `llama.cpp`/`llama-server`, vLLM, SGLang, TGI, Ollama, … It is protocol-level and server-agnostic: it addresses critical functionality gaps in native LLM servers by adding enterprise-grade capabilities via a transparent proxy, with **no modifications to the underlying service required**.
+<div align="right">English | <a href="README.zh-CN.md">简体中文</a></div>
 
-## Core Features
-### 🔒 Full-Lifecycle Safety Check
-- Pre-processing: Regex-based & Model-based safety validation for user prompts
-- Post-processing: Regex-based & Model-based safety validation for LLM responses
-- Tool invocation: Regex-based & Model-based safety validation for tool commands
+<p align="center">
+  <img src="assets/logo.svg" alt="lmlayer" width="560">
+</p>
 
-### 📝 Session & History Management
-- Session-based automatic history retrieval (frontend-agnostic, reliable server-side control)
-- Granular history metrics tracking:
-  - Cache token count
-  - PP (Prompt Processing) token count & timestamp
-  - TG (Token Generation) token count & timestamp
-- Customizable system prompt support
+# lmlayer
 
-### 🧠 RAG & Embedding/Rerank
-- Auto RAG (Automatic Retrieval-Augmented Generation)
-- Auto Rerank for retrieved documents (improves relevance)
-- Full embedding support (compatible with llama-server embedding endpoints)
-- Native rerank support (compatible with llama-server rerank endpoints)
+**Keep your model server. Add the layer it is missing.**
 
-### 🔧 Secure Tool Invocation
-- Python execution: Isolated via subprocess or Docker
-- Bash command execution: Isolated via subprocess or Docker
-- (Planned) Web search integration
+`lmlayer` is a drop-in, OpenAI-compatible proxy that puts safety checks, server-side session memory, automatic RAG, sandboxed tools, token quotas, and fair scheduling in front of any LLM server — llama.cpp, vLLM, SGLang, TGI, Ollama, or anything else that speaks the OpenAI API. The upstream server does not need to change.
 
-### 📡 Streaming Output
-- OpenAI-compatible streaming response
-- Real-time safety check for streaming content
+## Why lmlayer
 
-### ⚖️ Quota Management
-- Token quota calculation & enforcement (prevent abuse)
+Most OpenAI-compatible servers expose a model. They do not give you the operational layer around it: persistent conversations, prompt and response safety, retrieval, tool isolation, per-user budgets, or fair queueing. `lmlayer` adds that layer at the protocol boundary, so existing OpenAI clients keep working.
 
-### 🎛️ Fair Scheduling
-- Resource semaphore (prevents resource exhaustion)
-- Fair scheduling for concurrent requests (avoids starvation)
-- Sticky session (boosts cache hit rate for repeated requests)
+## Quick start
 
-### 🌐 Transparent Proxy
-- Passes through unrecognized HTTP headers/request arguments
-- 100% OpenAI API compatibility (works with existing OpenAI clients)
+Requirements: Python 3.11+ and at least one OpenAI-compatible upstream. PostgreSQL with pgvector is optional; when `DB` is not set, `lmlayer` uses an in-memory NumPy backend.
 
-### 🗄️ Flexible Database Support
-- PostgreSQL (with pgvector for production-grade vector storage/retrieval)
-- Local storage: Numpy-based cosine similarity (lightweight, no DB dependency for testing)
-
-## Quick Start
-### Prerequisites
-- `llama-server` installed (for LLM/embedding/rerank inference)
-- Docker (for PostgreSQL/pgvector deployment)
-- Python 3.8+ with `uvicorn`, `asyncpg`, `pgvector`, `numpy` (core dependencies)
-- Host network access (for Docker-PostgreSQL communication)
-
-### Step 1: Start Underlying LLM Services
-Launch llama-server instances for core LLM, embedding, and rerank (adjust model paths/parameters as needed):
 ```bash
-# Main LLM server (default port: 8080)
-llama-server -m Qwen3-0.6B-UD-Q4_K_XL.gguf --temp .7 --min-p 0 --top-p .8 --top-k 20 &
-
-# Embedding server (port: 8081)
-llama-server -m Qwen3-Embedding-0.6B-IQ4_XS.gguf --embedding --pooling last --port 8081 &
-
-# Rerank server (port: 8082)
-llama-server -m Qwen3-Reranker-0.6B-IQ4_XS.gguf --rerank --port 8082 &
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app:app --host 0.0.0.0 --port 8000
 ```
 
-### Step 2: Start PostgreSQL with pgvector
-Deploy a pgvector-enabled PostgreSQL instance for vector storage:
+With the default configuration, chat, embedding, and rerank upstreams are expected at `http://localhost:8080`, `:8081`, and `:8082`. Point them somewhere else with `MODEL`:
+
 ```bash
-docker run --network host -d \
+MODEL='{"qwen":{"cost":0,"instances":{"http://localhost:8080":1}},"qwenEmb":{"cost":0,"instances":{"http://localhost:8081":1},"embedding":true},"qwenRank":{"cost":0,"instances":{"http://localhost:8082":1},"rerank":true}}' \
+uvicorn app:app --host 0.0.0.0 --port 8000
+```
+
+The service is now available at `http://localhost:8000` and accepts OpenAI-style requests:
+
+```bash
+curl http://localhost:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"qwen","messages":[{"role":"user","content":"Hello"}]}'
+```
+
+### Persistent storage
+
+Start PostgreSQL with pgvector and pass its DSN to `lmlayer`:
+
+```bash
+docker run --network host -d --name lmlayer-db \
   -e POSTGRES_USER=root \
   -e POSTGRES_PASSWORD=root \
   -e POSTGRES_DB=postgres \
   pgvector/pgvector:pg18
-```
 
-### Step 3: Launch lmlayer
-Set the database DSN and start the FastAPI-based lmlayer service:
-```bash
-DB=postgresql+asyncpg://root:root@127.0.0.1:5432/postgres uvicorn app:app --host 0.0.0.0 --port 8000
-```
-
-### Verify Deployment
-Once all services are running, `lmlayer` will be accessible at `http://localhost:8000` and fully compatible with OpenAI API endpoints (e.g., `/v1/chat/completions`). You can test it with any OpenAI client (e.g., `openai` Python SDK) by pointing the base URL to `http://localhost:8000/v1`.
-
-## Detailed Feature Explanation
-### 1. Safety Check
-lmlayer enforces end-to-end safety validation to block unsafe content:
-- **Pre-check**: Validates user input before sending to the LLM (blocks harmful prompts via regex patterns or a dedicated safety model)
-- **Post-check**: Scans LLM outputs before returning to the client (prevents unsafe responses)
-- **Tool-check**: Validates tool commands (e.g., Python/Bash) to prevent malicious execution
-
-### 2. Session History Management
-Unlike frontend-managed history (unreliable), lmlayer:
-- Maintains server-side session state tied to user/session IDs
-- Automatically fetches relevant conversation history for each request
-- Tracks token usage and timestamps for quota enforcement and analytics
-
-### 3. Auto RAG & Rerank
-- Automatically retrieves context from the vector database (pgvector/local) based on user queries
-- Uses the rerank model to reorder retrieved documents (prioritizes high-relevance content)
-- Injects context into the LLM prompt transparently (no client-side changes needed)
-
-### 4. Fair Scheduling
-Prevents resource starvation and ensures equitable access to the LLM:
-- **Resource semaphore**: Limits concurrent requests to match the LLM server's capacity
-- **Fair scheduling**: Prioritizes pending requests to avoid long tail delays
-- **Sticky session**: Routes repeated requests from the same user to the same worker (improves cache hit rate)
-
-### 5. Transparent Proxy Design
-lmlayer acts as a "drop-in" proxy:
-- Passes through all unrecognized headers/parameters to the underlying LLM server
-- Maintains full compatibility with OpenAI API specs (works with existing clients like `openai` SDK)
-
-## Production Deployment
-### Install Python Dependencies
-Create a `requirements.txt` file:
-```txt
-uvicorn[standard]
-fastapi
-asyncpg
-pgvector
-numpy
-python-multipart
-httpx
-gunicorn  # For production process management
-```
-Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-### Production-Grade Launch
-Use `gunicorn` (instead of raw `uvicorn`) for process management:
-```bash
 DB=postgresql+asyncpg://root:root@127.0.0.1:5432/postgres \
-gunicorn app:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
+uvicorn app:app --host 0.0.0.0 --port 8000
 ```
 
-### Key Production Considerations
-- Use persistent volumes for PostgreSQL (avoid ephemeral Docker storage)
-- Isolate Docker-based tool execution with dedicated networks
-- Enable HTTPS via Nginx reverse proxy (for public access)
-- Monitor resource usage (CPU/RAM) for the LLM/embedding/rerank servers
-
-## Summary
-- `lmlayer` is an OpenAI-compatible enhancement layer for native LLM servers (vllm/llama-server)
-- Core value: Full-lifecycle safety, server-side session history, Auto RAG/rerank, and fair scheduling
-- Easy to deploy: Works with existing llama-server instances, uses pgvector for vector storage, and maintains transparent OpenAI API compatibility
-
-## Development / Smoke Test
-
-Verify the service imports and exposes the OpenAI-compatible surface without
-needing a database or a model server (the SQLAlchemy engine is lazy):
-
-```bash
-uv run --with fastapi --with httpx --with httpx_sse \
-   --with 'sqlalchemy[asyncio]' --with asyncpg --with pgvector \
-   --with numpy --with python-multipart --with uvicorn \
-   python tests/smoke_import.py
-```
-
-## Deployment (Docker Compose)
-
-`docker-compose.yml` starts pgvector + lmlayer; copy `.env.example` to `.env`
-and point `MODEL` at your OpenAI-compatible servers:
+### Docker Compose
 
 ```bash
 cp .env.example .env
+# Edit .env: DB and MODEL hosts must be reachable from inside the container.
 docker compose up --build
 ```
+
+`.env.example` is written for a host-run process (`127.0.0.1`). When using Compose, set the database host to `db` and upstream hosts to addresses the container can reach.
+
+## What it can do now
+
+- **OpenAI-compatible endpoints** — `/v1/chat/completions`, `/v1/embeddings`, and `/v1/rerank`, plus transparent pass-through for every other path.
+- **Full-lifecycle safety** — regex and optional model-based checks on prompts, responses, streamed chunks, and tool calls.
+- **Server-side sessions** — conversation history keyed by user and session, with history forking and cache/prompt/generation metrics.
+- **Automatic RAG** — embed the query, retrieve candidates from pgvector or the local NumPy store, rerank them, and inject context into the prompt.
+- **Tool loop** — Python and Bash tools executed through Docker or a host subprocess with a 60-second timeout.
+- **Quota and cost accounting** — per-user, exponentially decaying cost budgets with quota enforcement.
+- **Fair scheduling** — a priority lock per model, plus sticky routing to improve cache hits.
+- **Streaming** — SSE streaming with checks while tokens arrive.
+- **Flexible storage** — PostgreSQL/pgvector for production, in-memory storage for development.
+
+## Architecture
+
+```
+OpenAI client
+     │  /v1/chat/completions · /v1/embeddings · /v1/rerank · /*
+     ▼
+┌──────────────────────────── lmlayer ────────────────────────────┐
+│  safety  →  RAG (embed → retrieve → rerank)  →  quota + lock    │
+│     →  upstream request  →  stream / tool loop  →  response     │
+└───────────────┬───────────────────────────────┬─────────────────┘
+                │                               │
+      PostgreSQL + pgvector              OpenAI-compatible upstreams
+      (or in-memory NumPy)               (llama.cpp, vLLM, SGLang, …)
+```
+
+| Path | Responsibility |
+| --- | --- |
+| `app.py` | FastAPI routes, streaming responses, transparent pass-through |
+| `core.py` | Chat/embedding/rerank pipelines, safety, RAG, cost and scheduling |
+| `tool.py` | Tool schemas and subprocess execution |
+| `util.py` | Priority lock and text chunking |
+| `db/` | PostgreSQL and in-memory backends with a shared interface |
+| `tests/smoke_import.py` | Imports the app and asserts the OpenAI-compatible surface |
+
+## Configuration
+
+All settings are environment variables. The complete, commented list lives in [`.env.example`](.env.example). The ones you are most likely to change:
+
+| Variable | Purpose |
+| --- | --- |
+| `DB` | Async PostgreSQL DSN; omit it to use the in-memory backend |
+| `MODEL` | JSON map of model names to upstream instances, cost, and roles |
+| `EMBEDDING_DIM` | pgvector dimension (default `1024`) |
+| `EMBEDDING`, `RERANK` | Retrieval candidate count and reranked result count |
+| `SAFE_RE`, `SAFE_MODEL` | Regex safety pattern and optional safety-model endpoint |
+| `TOOL` | Tools exposed to the model (default `python bash`) |
+| `PROMPT`, `PROMPT_RAG` | System prompt and RAG prompt template |
+
+## Development
+
+Run the smoke check — it imports the app and verifies the three OpenAI-compatible routes without starting a database or contacting a model server:
+
+```bash
+python tests/smoke_import.py
+```
+
+The codebase is plain Python with no build step. `docker-compose.yml` provides a local pgvector + service stack, and [`docs/project-status.md`](docs/project-status.md) records the current implementation status and known boundaries.
+
+## How to contribute
+
+Issues and pull requests are welcome. Keep changes focused, run the smoke check before opening a PR, and update the docs when behavior or configuration changes. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the short version.
+
+## Roadmap
+
+**Implemented**
+
+- [x] OpenAI-compatible chat, embedding, and rerank endpoints with pass-through
+- [x] Prompt, response, streaming, and tool safety checks
+- [x] Server-side session history and fork support
+- [x] Auto RAG over pgvector or an in-memory NumPy store
+- [x] Docker/host tool execution with a hard timeout
+- [x] Per-user cost, quota enforcement, and decay
+- [x] Priority-based fair scheduling and sticky upstream routing
+- [x] SSE streaming with incremental safety checks
+
+**Planned**
+
+- [ ] Web search tool integration
+- [ ] End-to-end tests for retrieval and safety pipelines
+- [ ] Clarify the `python`/`bash` versus `docker/python`/`docker/bash` naming so the isolation mode is explicit
+- [ ] Document a hardened deployment profile for tool isolation
+
+The long-term aim is for `lmlayer` to be the invisible operational layer between an application and any model server: one endpoint that already knows about safety, memory, retrieval, tools, budgets, and fair access, while the model server stays replaceable.
+
+## License
+
+[AGPL-3.0](LICENSE).

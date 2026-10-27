@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 150" role="img" aria-labelledby="title desc">
+  <title id="title">lmlayer</title>
+  <desc id="desc">A stack of three glowing layers in front of the word lmlayer.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1020"/>
+      <stop offset="1" stop-color="#111936"/>
+    </linearGradient>
+    <linearGradient id="layer" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#818cf8"/>
+    </linearGradient>
+  </defs>
+  <rect width="560" height="150" rx="28" fill="url(#bg)"/>
+  <rect x="1" y="1" width="558" height="148" rx="27" fill="none" stroke="#ffffff" stroke-opacity=".08"/>
+  <g transform="translate(38 30)">
+    <rect x="0" y="0" width="90" height="90" rx="22" fill="#0f1730" stroke="url(#layer)" stroke-width="2"/>
+    <rect x="20" y="28" width="50" height="8" rx="4" fill="url(#layer)" opacity=".45"/>
+    <rect x="20" y="43" width="50" height="8" rx="4" fill="url(#layer)" opacity=".72"/>
+    <rect x="20" y="58" width="50" height="8" rx="4" fill="url(#layer)"/>
+    <circle cx="68" cy="67" r="4" fill="#e0f2fe"/>
+  </g>
+  <text x="158" y="84" fill="#f8fafc" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="54" font-weight="700" letter-spacing="-2.5">lmlayer</text>
+  <text x="161" y="113" fill="#94a3b8" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="15" font-weight="600" letter-spacing="2.6">OPENAI-COMPATIBLE LLM PROXY</text>
+</svg>
