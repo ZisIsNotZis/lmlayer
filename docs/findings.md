@@ -29,13 +29,13 @@
 |---|---|---|---|---|
 | N1 | 检索与安全流水线没有端到端测试；唯一的自动化检查是 `tests/smoke_import.py`，只断言 HTTP 表面存在 | 1 个测试文件 | `docs/project-status.md:37-38` | 成立 |
 | N2 | 工具执行隔离不由代码保证，取决于部署方是否使用专用 Docker 网络 | — | `docs/project-status.md:38-39` | 成立 |
-| N3 | "100% OpenAI API 兼容"只有 README 声明，仓内没有任何一致性测试或对拍脚本支撑 | — | `README.md:43`（声明）；反证：`docs/project-status.md:37-38`（仅 1 个表面级测试） | 部分 |
+| N3 | "100% OpenAI API 兼容"只有 README 声明，仓内没有任何一致性测试或对拍脚本支撑 | — | `README.md:11`（"drop-in, OpenAI-compatible proxy"）；反证：`docs/project-status.md:37-38`（仅 1 个表面级测试） | 部分 |
 
 ## 已知问题（仓内证据不足以下结论）
 
 | # | 问题 | 为什么是问题 | 缺什么证据 | 出处 |
 |---|---|---|---|---|
-| K1 | 工具名与执行位置方向相反：`python`/`bash` 在 `docker run --rm ipython/ipython` 里执行，`docker/python`/`docker/bash` 在服务自身进程所在的环境里执行（不加沙箱） | 前缀 `docker/` 指向容器，实际却是不隔离的那一侧。若部署方按字面理解为"更隔离"而设 `TOOL=docker/python`，模型的命令会直接落在服务进程所在的机器上 | 需 owner 说明或一份写明命名约定的文档。仓内两种读法都自洽：(a) 命名笔误，`docker/` 本意是 `host/`；(b) 有意——服务按 `docker-compose.yml` 部署在容器里，`docker/X` 表示"就在这个 docker 里跑"，`X` 表示"再套一层 `docker run`"。`README.md:25-26` 只说明两种隔离模式存在，没写工具名与模式的对应关系 | `tool.py:50-53`、`core.py:169`、`README.md:25-26`、`be0f4ee`（引入这两个工具名的提交） |
+| K1 | 工具名与执行位置方向相反：`python`/`bash` 在 `docker run --rm ipython/ipython` 里执行，`docker/python`/`docker/bash` 在服务自身进程所在的环境里执行（不加沙箱） | 前缀 `docker/` 指向容器，实际却是不隔离的那一侧。若部署方按字面理解为"更隔离"而设 `TOOL=docker/python`，模型的命令会直接落在服务进程所在的机器上 | 需 owner 说明或一份写明命名约定的文档。仓内两种读法都自洽：(a) 命名笔误，`docker/` 本意是 `host/`；(b) 有意——服务按 `docker-compose.yml` 部署在容器里，`docker/X` 表示"就在这个 docker 里跑"，`X` 表示"再套一层 `docker run`"。`README.md:74` 现在写明了工具名与隔离模式的对应关系（原先只说两种模式都存在），没写工具名与模式的对应关系 | `tool.py:50-53`、`core.py:169`、`README.md:74`、`be0f4ee`（引入这两个工具名的提交） |
 
 补充事实（可直接核对）：默认工具集是 `TOOL` 环境变量的默认值 `'python bash'`（`core.py:169`），即默认暴露给模型的是容器内执行的那两个；不隔离的 `docker/python`、`docker/bash` 只有部署方显式写进 `TOOL` 才会启用。`tool.py:50-53` 四个条目的 `description` 文本与工具名同样不对应（`bash`、`docker/bash` 的描述都写 "Run code in python"）。
 
@@ -46,6 +46,6 @@
 ## 未知（仓内无法确定，不做推断）
 
 - 冒烟检查当前是否通过：`tests/smoke_import.py:10-11` 约定了退出码含义，但本任务禁止运行项目，未复跑，因此未知。
-- 真实下游模型（llama-server/vLLM/SGLang/TGI/Ollama）的兼容性：`README.md:2` 点名了这些后端，仓内无对应测试或记录。
+- 真实下游模型（llama-server/vLLM/SGLang/TGI/Ollama）的兼容性：`README.md:11` 点名了这些后端，仓内无对应测试或记录。
 - 检索质量、重排效果、安全正则的漏拦/误拦率：仓内没有任何指标或数据文件。
 - 生产并发行为（优先锁在真实负载下的表现）：`util.py:17-44` 是唯一实现，仓内无压测记录。
